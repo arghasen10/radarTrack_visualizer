@@ -1,3 +1,4 @@
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -9,6 +10,7 @@ from OpenRadar.mmwave import dsp
 from OpenRadar.mmwave.dsp.utils import Window
 import time
 from datetime import datetime
+from scipy import stats
 import sys
 
 
@@ -111,6 +113,74 @@ def iterative_range_bins_detection(rangeResult):
     max_range_index=np.argmax(range_abs_combined_nparray_collapsed)
     return max_range_index, peaks_min_intensity_threshold, rangeResult
 
+def static_clusters(pointCloud, alpha, frame_no): 
+    std_dev_mult_factor = 1
+    angle = np.arctan2(pointCloud[:,[0]], pointCloud[:,[1]])
+    angle = np.where(angle > np.pi/2, angle - np.pi, angle)
+    angle = np.where(angle < -np.pi/2, angle + np.pi, angle)
+    vel_estimates = (pointCloud[:,[3]] / np.cos(alpha- angle)).T[0]
+    kde = stats.gaussian_kde(vel_estimates)
+    x_vals = np.linspace(min(vel_estimates), max(vel_estimates), 1000)
+    pdf_vals = kde(x_vals)
+    mode_kde = x_vals[np.argmax(pdf_vals)]
+    cdf_vals = np.cumsum(pdf_vals)
+    cdf_vals /= cdf_vals[-1] 
+    mask = cdf_vals >= (1 - 0.95) 
+    selected_x = x_vals[mask]
+    selected_pdf = pdf_vals[mask]
+    mean_kde = np.sum(selected_x * selected_pdf) / np.sum(selected_pdf)
+    variance_kde = np.sum((selected_x - mean_kde) ** 2 * selected_pdf) / np.sum(selected_pdf)
+    std_kde = np.sqrt(variance_kde)
+    
+    #Plotting 
+    # if frame_no+1 == 89:
+    #     plt.figure()
+    #     counts, bins, _ = plt.hist(vel_estimates, bins=40, density=False)
+    #     plt.axvline(mode_kde, color='r', linestyle='--', lw=4, label="Mode")
+    #     plt.axvline(mode_kde + std_kde, color='g', linestyle='--', lw=4, label=r'Mode $\pm 1 \sigma$')
+    #     plt.axvline(mode_kde - std_kde, color='g', linestyle='--', lw=4) #, label='Mode -1 Std Dev')
+    #     plt.ylabel("No. of occurances")
+    #     plt.xlabel("Speed (m/s)")
+    #     plt.xlim((-30, 30))
+    #     plt.xticks([-30, -15, 0, 15, 30])
+    #     plt.legend(ncol=2, fontsize=19, loc=(0,1.01))
+    #     plt.tight_layout()
+    #     plt.grid()
+    #     plt.savefig(fname=f'vel_histograms/hist_{frame_no+1}.png', dpi=300)
+    #     sys.exit()
+    
+    static_mask = (mean_kde - std_dev_mult_factor * std_kde < vel_estimates) & (vel_estimates < mean_kde + std_dev_mult_factor * std_kde) 
+    static_points = pointCloud[static_mask]
+    dynamic_points = pointCloud[~static_mask]
+    return static_points, dynamic_points
+
+
+def calc_alpha(point1, point2):
+    """
+    Calcs alpha : angle between the radar Y axis and the velocity vector
+
+    Args:
+    point1 [x, y, z, V, energy, R]
+    point2 [x, y, z, V, energy, R]
+    """
+    theta1 = np.arctan(point1[0] / point1[1])
+    theta2 = np.arctan(point2[0] / point2[1])
+    a = point2[3]*np.cos(theta1) - point1[3]*np.cos(theta2)
+    b = point1[3]*np.sin(theta2) - point2[3]*np.sin(theta1)
+    alpha = np.arctan(a/b)
+    return alpha
+
+def estimate_alpha(pointCloud):
+    alpha_list = []
+    for point1, point2 in itertools.combinations(pointCloud, 2):
+        alpha_list.append(calc_alpha(point1, point2))
+
+    # for j in range(pointCloud.shape[0]-1):
+    #     alpha_list.append(calc_alpha(pointCloud[j], pointCloud[j+1]))
+
+    alpha = np.mode(alpha_list)
+    return alpha
+
 
 def get_phase(r,i):
     if r==0:
@@ -130,7 +200,6 @@ def get_phase(r,i):
             phase=np.pi + np.arctan(i/r)
     return phase
 
-
 def phase_unwrapping(phase_len,phase_cur_frame):
     i=1
     new_signal_phase = phase_cur_frame
@@ -144,8 +213,8 @@ def phase_unwrapping(phase_len,phase_cur_frame):
 
 def solve_equation(phase_cur_frame):
     phase_diff=[]
-    for soham in range (1,len(phase_cur_frame)):
-        phase_diff.append(phase_cur_frame[soham]-phase_cur_frame[soham-1])
+    for j in range (1,len(phase_cur_frame)):
+        phase_diff.append(phase_cur_frame[j]-phase_cur_frame[j-1])
     L=100
     r0=20
     roots_of_frame=[]
@@ -158,7 +227,7 @@ def solve_equation(phase_cur_frame):
         c4=2*L*c*c*t
         c5=-r0*r0*c*c
         coefficients=[c1, c2, c3, c4, c5]
-        root=min(np.abs(np.roots(coefficients)))
+        root=min(np.abs(np.roots(coefficients)))  #Taking the min root 
         roots_of_frame.append(root)
     median_root=np.median(roots_of_frame)
     final_roots=[]
@@ -193,7 +262,7 @@ def get_velocity(rangeResult,range_peaks):
     return vel_array_frame
 
 
-def dopplerFFT(rangeResult):  #
+def dopplerFFT(rangeResult):  
     windowedBins2D = rangeResult * np.reshape(np.hamming(numLoopsPerFrame), (1, 1, -1, 1))
     dopplerFFTResult = np.fft.fft(windowedBins2D, axis=2)
     dopplerFFTResult = np.fft.fftshift(dopplerFFTResult, axes=2)
@@ -202,8 +271,7 @@ def dopplerFFT(rangeResult):  #
 
 def speed_estimation_fn(range_bins, rangeResult):
     vel_array_frame = np.array(get_velocity(rangeResult,range_bins)).flatten()
-    return vel_array_frame
-    
+    return vel_array_frame  
 
 
 if __name__ == "__main__":
@@ -239,7 +307,15 @@ if __name__ == "__main__":
             overlapped_range_bins.append(np.array(list(curr_ranges)))
             range_bins = overlapped_range_bins[-1]
         print(f"range_bins: {range_bins}, prev_range_bins: {prev_range_bins}, overlapped_range_bins: {overlapped_range_bins}")
-        vel_array_frame = speed_estimation_fn(range_bins, rangeResult)
+        # Find alpha
+        alpha = estimate_alpha(pointcloud)
+        
+        # Static/dynamic segregation 
+        static_pcd, static_range_bins = get_static_points(pointcloud, rangeResult, alpha) 
+
+        # Estimate translational speed 
+        vel_array_frame = speed_estimation_fn(static_range_bins, rangeResult, static_pcd)
+
         print("vel_array_frame", vel_array_frame.shape)
 
         if fig is None:
