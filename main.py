@@ -227,7 +227,7 @@ def solve_equation(phase_cur_frame, xyz_vals, alpha):
     X0 = xyz_vals[0]
     Y0 = xyz_vals[1]
     K = X0*np.sin(alpha) + Y0*np.cos(alpha)
-    r0 = X0**2 + Y0**2
+    r0 = np.sqrt(X0**2 + Y0**2)
 
     roots_of_frame=[]
     for i,val in enumerate(phase_diff):
