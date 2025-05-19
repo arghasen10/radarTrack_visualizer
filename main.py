@@ -6,9 +6,9 @@ import seaborn as sns
 from configuration import *
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.widgets import Button
-from mmwave.dataloader import DCA1000
-from mmwave import dsp
-from mmwave.dsp.utils import Window
+from OpenRadar.mmwave.dataloader import DCA1000
+from OpenRadar.mmwave import dsp
+from OpenRadar.mmwave.dsp.utils import Window
 import time
 from datetime import datetime
 from scipy import stats
