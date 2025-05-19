@@ -13,11 +13,15 @@ import time
 from datetime import datetime
 from scipy import stats
 import sys
+plt.rcParams.update({'font.size': 12})
+plt.rcParams["figure.figsize"] = (10, 7)
+plt.rcParams["font.weight"] = "bold"
+plt.rcParams["axes.labelweight"] = "bold"
 
 fig = plt.figure(figsize=(18, 10))
 ax1 = fig.add_subplot(1, 3, 1)
 ax2 = fig.add_subplot(1, 3, 2)
-ax3 = fig.add_subplot(1, 3, 3)
+ax3 = fig.add_subplot(133, projection='3d')
 
 stop_flag = False
 start_flag = True  
@@ -289,23 +293,38 @@ def speed_estimation_fn(range_bins, rangeResult, static_pcd, alpha):
     return vel_array_frame  
 
 def update(frame_data):
-    rangefft_out, det_matrix_vis, vel_mean, i = frame_data
+    rangefft_out, det_matrix_vis, vel_mean, pointcloud, i = frame_data
 
     ax1.cla()
     ax2.cla()
     ax3.cla()
 
-    ax1.plot(rangefft_out)
-    ax1.set_title("RangeFFT")
-
+    sns.heatmap(rangefft_out / rangefft_out.max(), ax=ax1, cbar=False, cmap='viridis')
+    ax1.set_title("Range Chirp Plot")
+    ax1.set_xticks(np.linspace(0, rangefft_out.shape[1]-1, 10, dtype=int))  # 10 x-ticks
+    ax1.set_yticks(np.linspace(0, rangefft_out.shape[0]-1, 10, dtype=int))  # 10 y-ticks
+    ax1.set_xticklabels(np.linspace(0, rangefft_out.shape[1]-1, 10, dtype=int))
+    ax1.set_yticklabels(np.linspace(0, rangefft_out.shape[0]-1, 10, dtype=int))
     sns.heatmap(det_matrix_vis / det_matrix_vis.max(), ax=ax2, cbar=False, cmap='viridis')
-    ax2.set_title("Range-Doppler Heatmap")
+    ax2.set_title("Range-Doppler Plot")
+    ax2.set_xticks(np.linspace(0, det_matrix_vis.shape[1]-1, 10, dtype=int))
+    ax2.set_yticks(np.linspace(0, det_matrix_vis.shape[0]-1, 10, dtype=int))
+    ax2.set_xticklabels(np.linspace(0, det_matrix_vis.shape[1]-1, 10, dtype=int))
+    ax2.set_yticklabels(np.linspace(0, det_matrix_vis.shape[0]-1, 10, dtype=int))
 
-    ax3.axis('off')
-    message = f"Iteration {i+1}/100\nEstimated Speed: {vel_mean:.3f} m/s"
-    ax3.text(0.5, 0.5, message, ha='center', va='center', fontsize=14, fontweight='bold')
+    x, y, z = pointcloud[:,0], pointcloud[:,1], pointcloud[:,2]
+    
+    ax3.scatter(x, y, z, c='blue', marker='o', s=20)
 
-    return ax1, ax2, ax3
+    ax3.set_title("3D Pointcloud")
+    ax3.set_xlabel('X')
+    ax3.set_ylabel('Y')
+    ax3.set_zlabel('Z')
+    ax3.set_xlim(-5,5)
+    ax3.set_ylim(0,10)
+    ax3.set_zlim(-5,5)
+
+    return ax1, ax2, ax3,
 
 
 if __name__ == "__main__":
@@ -328,6 +347,9 @@ if __name__ == "__main__":
 
         try:
             radar_cube = dsp.range_processing(adc_data_frame[0], window_type_1d=Window.BLACKMAN)
+            radar_cube1 = np.expand_dims(radar_cube, axis=1)
+            rangechirp = np.concatenate((radar_cube1[0::3],radar_cube1[1::3],radar_cube1[2::3]),axis=1)
+            rangechirp = np.abs(rangechirp).sum(axis=(1,2))
             rangefft_out = np.abs(radar_cube).sum(axis=(0,1))
             det_matrix, aoa_input = dsp.doppler_processing(radar_cube, num_tx_antennas=3, clutter_removal_enabled=True, window_type_2d=Window.HAMMING)
             det_matrix_vis = np.fft.fftshift(det_matrix, axes=1)
@@ -349,7 +371,7 @@ if __name__ == "__main__":
             vel_array_frame = speed_estimation_fn(static_range_bins, rangeResult, static_pcd, alpha)
 
             # -- Plotting: add data for frame i 
-            frames_data.append((rangefft_out, det_matrix_vis, vel_array_frame.mean(), i))
+            frames_data.append((rangechirp, det_matrix_vis, vel_array_frame.mean(), pointcloud, i))
         
         except Exception as e:
             print(e)
