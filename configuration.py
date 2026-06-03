@@ -9,5 +9,5 @@ numRangeBins = numADCSamples
 numDopplerBins = numLoopsPerFrame
 numAngleBins = 64
 range_resolution = 0.044
-
+NUM_FRAMES = 301
 
